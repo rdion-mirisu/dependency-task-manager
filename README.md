@@ -5,7 +5,6 @@ This repository holds a **Flask backend** and a **React frontend** scaffold. Dev
 ---
 
 ## Backend
-
 The backend is a simple Flask app serving JSON on `/`.
 
 ### Setup
