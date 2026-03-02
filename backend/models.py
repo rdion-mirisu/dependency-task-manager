@@ -10,6 +10,12 @@ class User(db.Model):
     password_hash = db.Column(db.String(128), nullable=False)
     tasks = db.relationship('Task', backref='owner', lazy=True)
 
+    def set_password(self, password):
+        self.password_hash = password
+    
+    def check_password(self, password):
+        return self.check_password_hash(self.password_hash, password)
+    
     def __repr__(self):
         return f"<User {self.username}>"
 
