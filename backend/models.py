@@ -1,6 +1,10 @@
-from app import db
+from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import uuid
+from werkzeug.security import generate_password_hash, check_password_hash
+
+# Initialize SQLAlchemy here to avoid circular imports with `app`.
+db = SQLAlchemy()
 
 
 class User(db.Model):
@@ -11,11 +15,11 @@ class User(db.Model):
     tasks = db.relationship('Task', backref='owner', lazy=True)
 
     def set_password(self, password):
-        self.password_hash = password
-    
+        self.password_hash = generate_password_hash(password)
+
     def check_password(self, password):
-        return self.check_password_hash(self.password_hash, password)
-    
+        return check_password_hash(self.password_hash, password)
+
     def __repr__(self):
         return f"<User {self.username}>"
 
