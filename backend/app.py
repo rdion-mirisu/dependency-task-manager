@@ -1,15 +1,17 @@
 from flask import Flask, jsonify, request
 from flask_migrate import Migrate
+from flask_cors import CORS
 from dotenv import load_dotenv
 import os
 from datetime import datetime
 
-from backend.models import db, User, Task, Contact, WaitingDetail
+from models import db, User, Task, Contact, WaitingDetail
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 
 load_dotenv()
 
 app = Flask(__name__)
+CORS(app)
 
 # CONFIGURATION
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL", "postgresql://username:password@localhost:5432/waitflow_db")
