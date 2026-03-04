@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 import os
 from datetime import datetime
 
-from models import db, User, Task, Contact, WaitingDetail
+from backend.models import db, User, Task, Contact, WaitingDetail
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 
 load_dotenv()
@@ -140,7 +140,8 @@ def get_tasks():
             "title": task.title,
             "description": task.description,
             "status": task.status,
-            "waiting_info": None
+            "waiting_info": None,
+            "total_wait_duration": task.total_wait_duration
         }
         
         if task.waiting_info:
@@ -186,7 +187,10 @@ def update_task_status(id):
 
         elif task.status == 'waiting' and new_status != 'waiting':
             if task.waiting_info:
-                duration = datetime.utcnow() - task.waiting_info.wait_start_per_date
+                duration_td = datetime.utcnow() - task.waiting_info.wait_start_per_date
+                # If moving from waiting to completed, store total wait duration on the task (in seconds)
+                if new_status == 'completed':
+                    task.total_wait_duration = int(duration_td.total_seconds())
                 db.session.delete(task.waiting_info)
         
         task.status = new_status
@@ -220,7 +224,8 @@ def get_task_details(id):
             "reason": task.waiting_info.reason if task.waiting_info else None,
             "contact_id": task.waiting_info.contact_id if task.waiting_info else None,
             "wait_start_per_date": task.waiting_info.wait_start_per_date.isoformat() if task.waiting_info else None
-        } if task.status == 'waiting' else None
+        } if task.status == 'waiting' else None,
+        "total_wait_duration": task.total_wait_duration
     }
 
     return jsonify({"task": task_data}), 200

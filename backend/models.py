@@ -29,6 +29,7 @@ class Task(db.Model):
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text, nullable=True)
     status = db.Column(db.String(20), nullable=False, default='active')
+    total_wait_duration = db.Column(db.Integer, nullable=True)
     user_id = db.Column(db.String(36), db.ForeignKey('user.id'), nullable=False)
     waiting_info = db.relationship('WaitingDetail', backref='task', uselist=False)
 
