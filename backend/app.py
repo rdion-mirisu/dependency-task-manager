@@ -4,6 +4,10 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 import os
 from datetime import datetime
+from flask_sqlalchemy import functions
+from google_auth_oauthlib.flow import Flow
+from googleapiclient.discovery import build
+import json
 
 from models import db, User, Task, Contact, WaitingDetail
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
@@ -14,7 +18,7 @@ app = Flask(__name__)
 CORS(app)
 
 # CONFIGURATION
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL", "postgresql://username:password@localhost:5432/waitflow_db")
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL", "postgresql://postgres:fatebay11@localhost:5432/postgres")
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "your_secret_key_here")
 
@@ -254,7 +258,126 @@ def delete_task(id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"message": "Error deleting task", "error": str(e)}), 500
+
+# POST /api/tasks/{id}/forward IMPLEMENTATION
+@app.route("/api/tasks/<int:id>/forward", methods=["POST"])
+@jwt_required()
+def forward_task(id):
+    current_user_id = get_jwt_identity()
+    data = request.get_json()
+
+    task = Task.query.filter_by(id=id, user_id=current_user_id).first()
+    if not task:
+        return jsonify({"message": "Task not found"}), 404
     
+    if task.status == 'waiting' or not task.waiting_info:
+        return jsonify({"message": "Cannot forward a task that is currently waiting"}), 400
+    
+    new_contact_id = data.get('contact_id')
+    new_reason = data.get('reason')
+
+    if not new_contact_id:
+        return jsonify({"message": "New contact ID is required"}), 400
+    
+    try:
+        task.waiting_info.contact_id = new_contact_id
+
+        if new_reason:
+            task.waiting_info.reason = new_reason
+        
+        task.waiting_info.wait_start_per_date = datetime.utcnow()
+
+        db.session.commit()
+
+        return jsonify({"message": "Task forwarded successfully", "task_id": task.id}), 200
+    
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"message": "Error forwarding task", "error": str(e)}), 500
+
+#GET /api/analytics/average-wait IMPLEMENTATION
+@app.route("/api/analytics/average-wait", methods=["GET"])
+@jwt_required()
+def get_average_wait():
+    current_user_id = get_jwt_identity()
+
+    contact_stats = db.session.query(
+        WaitingDetail.contact_id,
+        functions.avg(Task.total_wait_duration).label('average_wait')
+    ).join(Task, WaitingDetail.task_id == Task.id).filter(
+        Task.user_id == current_user_id,
+        Task.status == 'completed',
+        Task.total_wait_duration != None
+    ).group_by(WaitingDetail.contact_id).all()
+
+    task_type_stats = db.session.query(
+        Task.title,
+        functions.avg(Task.total_wait_duration).label('average_wait')
+    ).filter(
+        Task.user_id == current_user_id,
+        Task.status == 'completed',
+        Task.total_wait_duration != None
+    ).group_by(Task.title).all()
+
+    return jsonify({
+        "average_wait_by_contact": [
+            {"contact_id": contact_id, "average_wait": average_wait} for contact_id, average_wait in contact_stats
+        ],
+        "average_wait_by_task_type": [
+            {"task_title": title, "average_wait": average_wait} for title, average_wait in task_type_stats
+        ]
+    }), 200
+
+#POST /api/integration/google/oauth
+########################IMPORTANT#############################
+# Replace with your actual redirect URI from Google Console
+REDIRECT_URI = "http://localhost:5000/api/integration/google/callback"
+SCOPES = ['https://www.googleapis.com/auth/calendar.events']
+##############################################################
+@app.route("/api/integration/google/oauth", methods=["POST"])
+@jwt_required()
+def google_oauth():
+    """Step 1: Generate the Authorization URL for the frontend to open"""
+    current_user_id = get_jwt_identity()
+    
+    flow = Flow.from_client_secrets_file(
+        'client_secret.json',
+        scopes=SCOPES,
+        redirect_uri=REDIRECT_URI
+    )
+
+    auth_url, state = flow.authorization_url(prompt='consent')
+    
+    return jsonify({"auth_url": auth_url}), 200
+
+@app.route("/api/integration/google/callback", methods=["GET"])
+def google_callback():
+    """Step 2: Handle the code returned by Google and create a Calendar event"""
+    state = request.args.get('state')
+    code = request.args.get('code')
+
+    flow = Flow.from_client_secrets_file(
+        'client_secret.json',
+        scopes=SCOPES,
+        redirect_uri=REDIRECT_URI
+    )
+    flow.fetch_token(code=code)
+    credentials = flow.credentials
+
+    service = build('calendar', 'v3', credentials=credentials)
+
+    event = {
+      'summary': 'WaitFlow Follow-up: Project Update',
+      'description': 'Reminder to check on pending task dependency.',
+      'start': {'dateTime': '2026-03-10T09:00:00Z', 'timeZone': 'UTC'},
+      'end': {'dateTime': '2026-03-10T10:00:00Z', 'timeZone': 'UTC'},
+    }
+
+    event = service.events().insert(calendarId='primary', body=event).execute()
+
+    return f"Success! Event created: {event.get('htmlLink')}"
+
+
 if __name__ == "__main__":
     app.run(debug=True)
 
