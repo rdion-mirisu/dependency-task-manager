@@ -1,7 +1,7 @@
 import { Task } from "../api/tasks";
 
 export function getWaitingStartISO(task: Task): string | null {
-  return task.waitingSince ?? null;
+  return task.waiting_started_at ?? null;
 }
 
 export function formatDuration(ms: number) {

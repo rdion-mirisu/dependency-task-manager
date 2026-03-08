@@ -1,42 +1,37 @@
-export type TaskStatus = "Active" | "Waiting" | "Completed";
+export type TaskStatus = "active" | "waiting" | "completed";
 
-export type WaitingDetails = {
-  contactName?: string;      // person/department name
-  contactPhone?: string;     // optional
-  department?: string;       // optional (if you use dept instead)
+export type WaitingInfo = {
+  reason?: string;
+  contact_id?: number | null;
+  wait_start_per_date?: string;
 };
 
 export type Task = {
-  id: string;
+  id: number | string;
   title: string;
-  description: string;
-  category: string;
-  urgency: string;           // e.g. Low/Medium/High or numeric
+  description: string | null;
   status: TaskStatus;
-
-  // IMPORTANT for waiting duration:
-  waitingSince?: string;     // ISO timestamp when task entered Waiting
-  updatedAt?: string;        // fallback if waitingSince not provided
-  waitingDetails?: WaitingDetails;
+  deadline?: string | null;
+  total_wait_duration?: number | null;
+  waiting_started_at?: string | null;
+  waiting_ended_at?: string | null;
+  waiting_info?: WaitingInfo | null;
 };
 
 export type CreateTaskPayload = {
   title: string;
-  description: string;
-  category: string;
-  urgency: string;
-  status?: TaskStatus;               // default "Active"
-  waitingDetails?: WaitingDetails;   // usually empty on create
+  description?: string;
+  status?: TaskStatus; // default to "active" on server
+  deadline?: string | null;
 };
 
 export type PatchTaskPayload = Partial<{
   title: string;
-  description: string;
-  category: string;
-  urgency: string;
+  description: string | null;
   status: TaskStatus;
-  waitingSince: string | null;
-  waitingDetails: WaitingDetails | null;
+  deadline: string | null;
+  contact_id: number;
+  reason: string;
 }>;
 
 // Simple in-memory auth token store.
@@ -50,19 +45,44 @@ export function setAuthToken(token: string | null) {
 
 const API_BASE = process.env.REACT_APP_API_BASE_URL ?? "";
 
+function getNetworkErrorMessage(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (
+    msg === "Failed to fetch" ||
+    msg.includes("NetworkError") ||
+    msg.includes("Load failed") ||
+    msg.includes("connection")
+  ) {
+    return "Cannot reach the server. Make sure the backend is running (e.g. on port 5000).";
+  }
+  return msg;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-      ...(options.headers ?? {}),
-    },
-    ...options,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        ...(options.headers ?? {}),
+      },
+      ...options,
+    });
+  } catch (err) {
+    throw new Error(getNetworkErrorMessage(err));
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`API ${res.status}: ${text || res.statusText}`);
+    let message = text || res.statusText;
+    try {
+      const json = JSON.parse(text);
+      if (typeof json.message === "string") message = json.message;
+    } catch {
+      // use text as-is
+    }
+    throw new Error(message);
   }
 
   return res.json() as Promise<T>;
@@ -95,17 +115,26 @@ export async function registerUser(
 }
 
 export const TasksAPI = {
-  list: () => request<Task[]>("/api/tasks"),
+  // Backend returns { tasks: Task[] }; unwrap for callers
+  list: async () => {
+    const data = await request<{ tasks: Task[] }>("/api/tasks");
+    return data.tasks;
+  },
 
-  // optional: list waiting using spec filter GET /api/tasks?status=waiting
-  listFiltered: (filter: string) =>
-    request<Task[]>(`/api/tasks?status=${encodeURIComponent(filter)}`),
+  listFiltered: async (filter: string) => {
+    const data = await request<{ tasks: Task[] }>(
+      `/api/tasks?status=${encodeURIComponent(filter)}`
+    );
+    return data.tasks;
+  },
 
-  create: (payload: CreateTaskPayload) =>
-    request<Task>("/api/tasks", {
+  create: async (payload: CreateTaskPayload) => {
+    const data = await request<{ task: Task }>("/api/tasks", {
       method: "POST",
       body: JSON.stringify(payload),
-    }),
+    });
+    return data.task;
+  },
 
   patch: (id: string, payload: PatchTaskPayload) =>
     request<Task>(`/api/tasks/${id}`, {
@@ -116,3 +145,67 @@ export const TasksAPI = {
   delete: (id: string) =>
     request<{ message: string }>(`/api/tasks/${id}`, { method: "DELETE" }),
 };
+
+// analytics helper
+export function getAverageWait() {
+  return request<Array<{
+    contact_name: string;
+    average_wait_hours: number;
+    total_tasks: number;
+  }>>("/api/analytics/average-wait");
+}
+
+// admin-specific operations
+export const AdminAPI = {
+  listTasks: () => request<any[]>("/api/admin/tasks"),
+  updateStatus: (id: string, status: string) =>
+    request<any>(`/api/admin/tasks/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+};
+
+// integration helpers
+export const IntegrationAPI = {
+  // GET returns { auth_url }
+  connectGoogle: () => request<{ auth_url: string }>("/api/integration/google/oauth", {
+    method: "POST",
+  }),
+  // POST with {code} to exchange tokens
+  finalizeGoogle: (code: string) =>
+    request<{ message: string }>("/api/integration/google/oauth", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
+  syncGoogle: () =>
+    request<{ created_event_ids: string[] }>("/api/integration/google/sync"),
+  exportICal: async () => {
+    const res = await fetch(`${API_BASE}/api/integration/ical/export`, {
+      headers: {
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      },
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`API ${res.status}: ${txt || res.statusText}`);
+    }
+    return res.blob();
+  },
+};
+
+// simple JWT parser
+export function parseJwt(token: string | null) {
+  if (!token) return null;
+  try {
+    const base64 = token.split('.')[1];
+    const json = atob(base64);
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+export function getIsAdmin() {
+  const p = parseJwt(authToken);
+  return !!p?.is_admin;
+}

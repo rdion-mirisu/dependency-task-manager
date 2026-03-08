@@ -12,10 +12,10 @@ export function Dashboard() {
     setError(null);
     setLoading(true);
     try {
-      const data = await TasksAPI.list(); // GET /api/tasks
+      const data = await TasksAPI.list();
       setTasks(data);
-    } catch (e: any) {
-      setError(e.message ?? "Failed to load tasks");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load tasks");
     } finally {
       setLoading(false);
     }
@@ -26,100 +26,81 @@ export function Dashboard() {
   }, []);
 
   const counts = React.useMemo(() => {
-    const c: Record<string, number> = { Active: 0, Waiting: 0, Completed: 0 };
+    const c: Record<string, number> = { active: 0, waiting: 0, completed: 0 };
     for (const t of tasks) {
       c[t.status] = (c[t.status] ?? 0) + 1;
     }
-    return c as { Active: number; Waiting: number; Completed: number };
+    return c as { active: number; waiting: number; completed: number };
   }, [tasks]);
 
   return (
-    <div style={{ maxWidth: 1000, margin: "0 auto", padding: 20 }}>
-      <h1>Dashboard</h1>
+    <div className="page">
+      <h1 className="page-title">Dashboard</h1>
 
-      <CreateTaskForm onCreated={(newTask) => setTasks([...tasks, newTask])} />
+      <section className="card card-body" style={{ marginBottom: "1.5rem" }}>
+        <CreateTaskForm onCreated={(newTask) => setTasks((prev) => [...prev, newTask])} />
+      </section>
 
-      <div
-        style={{
-          display: "flex",
-          gap: 12,
-          marginBottom: 16,
-          marginTop: 24,
-          flexWrap: "wrap",
-        }}
-      >
-        <StatCard label="Active" value={counts.Active} color="#4CAF50" />
-        <StatCard label="Waiting" value={counts.Waiting} color="#FFC107" />
-        <StatCard label="Completed" value={counts.Completed} color="#2196F3" />
+      <div style={{ display: "flex", gap: "1rem", marginBottom: "1.5rem", flexWrap: "wrap" }}>
+        <StatCard label="Active" value={counts.active} color="var(--status-active)" />
+        <StatCard label="Waiting" value={counts.waiting} color="var(--status-waiting)" />
+        <StatCard label="Completed" value={counts.completed} color="var(--status-completed)" />
       </div>
 
-      {/* Simple visualization bar */}
       <StatusBar counts={counts} />
 
-      {loading && <p>Loading…</p>}
-      {error && <p style={{ color: "crimson" }}>Error: {error}</p>}
+      {loading && <p className="loading">Loading tasks…</p>}
+      {error && <div className="alert alert-error">Error: {error}</div>}
 
-      {/* render tasks list */}
-      {!loading && tasks.length === 0 && <p>No tasks yet. Create one above!</p>}
-      {!loading &&
-        tasks.map((t) => (
-          <TaskCard key={t.id} task={t} onChanged={load} onDeleted={() => load()} />
-        ))}
+      {!loading && tasks.length === 0 && (
+        <div className="card card-body empty-state">
+          No tasks yet. Create one above to get started.
+        </div>
+      )}
+
+      {!loading && tasks.length > 0 && (
+        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+          {tasks.map((t) => (
+            <li key={String(t.id)}>
+              <TaskCard task={t} onChanged={load} onDeleted={load} />
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
 
-function StatCard({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: number;
-  color?: string;
-}) {
+function StatCard({ label, value, color }: { label: string; value: number; color?: string }) {
   return (
-    <div
-      style={{
-        padding: 12,
-        border: "1px solid #ddd",
-        borderRadius: 10,
-        minWidth: 120,
-        textAlign: "center",
-      }}
-    >
-      <div style={{ fontSize: 12, opacity: 0.7 }}>{label}</div>
-      <div style={{ fontSize: 24, fontWeight: 700, color: color ?? "#333" }}>
-        {value}
-      </div>
+    <div className="card card-body" style={{ minWidth: "120px", textAlign: "center" }}>
+      <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600, marginBottom: "0.25rem" }}>{label}</div>
+      <div style={{ fontSize: "1.75rem", fontWeight: 700, color: color ?? "var(--text)" }}>{value}</div>
     </div>
   );
 }
 
-function StatusBar({
-  counts,
-}: {
-  counts: { Active: number; Waiting: number; Completed: number };
-}) {
-  const total = counts.Active + counts.Waiting + counts.Completed || 1;
-  const a = (counts.Active / total) * 100;
-  const w = (counts.Waiting / total) * 100;
-  const c = (counts.Completed / total) * 100;
+function StatusBar({ counts }: { counts: { active: number; waiting: number; completed: number } }) {
+  const total = counts.active + counts.waiting + counts.completed || 1;
+  const a = (counts.active / total) * 100;
+  const w = (counts.waiting / total) * 100;
+  const c = (counts.completed / total) * 100;
 
   return (
     <div
       style={{
-        height: 10,
+        height: "10px",
         display: "flex",
-        borderRadius: 999,
+        borderRadius: "999px",
         overflow: "hidden",
-        border: "1px solid #eee",
-        marginBottom: 16,
+        border: "1px solid var(--border)",
+        marginBottom: "1.5rem",
+        background: "var(--bg)",
       }}
     >
-      <div style={{ width: `${a}%`, background: "#4CAF50" }} title="Active" />
-      <div style={{ width: `${w}%`, background: "#FFC107" }} title="Waiting" />
-      <div style={{ width: `${c}%`, background: "#2196F3" }} title="Completed" />
+      <div style={{ width: `${a}%`, background: "var(--status-active)" }} title="Active" />
+      <div style={{ width: `${w}%`, background: "var(--status-waiting)" }} title="Waiting" />
+      <div style={{ width: `${c}%`, background: "var(--status-completed)" }} title="Completed" />
     </div>
   );
 }

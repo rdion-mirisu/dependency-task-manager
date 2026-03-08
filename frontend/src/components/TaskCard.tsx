@@ -1,7 +1,7 @@
 import React from "react";
 import { TasksAPI, Task, TaskStatus } from "../api/tasks";
 import { useNow } from "../utils/useNow";
-import { getWaitingStartISO, formatDuration } from "../utils/waitingTime";
+import { formatDuration } from "../utils/waitingTime";
 
 export function TaskCard({
   task,
@@ -15,186 +15,156 @@ export function TaskCard({
   const now = useNow(60000);
   const [updating, setUpdating] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
+  const [pendingWaiting, setPendingWaiting] = React.useState(false);
+  const [contactId, setContactId] = React.useState("");
+  const [reason, setReason] = React.useState("");
 
-  const waitingISO = getWaitingStartISO(task);
-  const waitingMs =
-    task.status === "Waiting" && waitingISO ? now - Date.parse(waitingISO) : 0;
+  const waitingISO = task.waiting_started_at ?? null;
+  const waitingMs = task.status === "waiting" && waitingISO ? now - Date.parse(waitingISO) : 0;
+  const taskId = String(task.id);
 
-  async function updateStatus(next: TaskStatus) {
+  async function updateStatus(next: TaskStatus, contactIdNum?: number, reasonText?: string) {
     setUpdating(true);
     try {
-      const payload: any = { status: next };
-
-      if (next === "Waiting") {
-        payload.waitingSince = task.waitingSince ?? new Date().toISOString();
-        payload.waitingDetails = task.waitingDetails ?? { contactName: "" };
-      } else {
-        // leaving waiting -> clear waitingSince
-        payload.waitingSince = null;
+      const payload: { status: TaskStatus; contact_id?: number; reason?: string } = { status: next };
+      if (next === "waiting" && contactIdNum != null) {
+        payload.contact_id = contactIdNum;
+        if (reasonText != null) payload.reason = reasonText;
       }
-
-      await TasksAPI.patch(task.id, payload); // PATCH /api/tasks/{id}
+      await TasksAPI.patch(taskId, payload);
+      setPendingWaiting(false);
+      setContactId("");
+      setReason("");
       onChanged();
     } catch (err) {
-      alert("Error updating status: " + (err as any).message);
+      alert("Error updating status: " + (err instanceof Error ? err.message : "Unknown error"));
     } finally {
       setUpdating(false);
     }
   }
 
-  async function updateWaitingDetails(waitingDetails: any) {
-    setUpdating(true);
-    try {
-      await TasksAPI.patch(task.id, { waitingDetails }); // PATCH /api/tasks/{id}
-      onChanged();
-    } catch (err) {
-      alert("Error updating details: " + (err as any).message);
-    } finally {
-      setUpdating(false);
+  function handleStatusChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const next = e.target.value as TaskStatus;
+    if (next === "waiting") {
+      setPendingWaiting(true);
+      return;
     }
+    updateStatus(next);
+  }
+
+  function submitWaiting() {
+    const num = parseInt(contactId, 10);
+    if (Number.isNaN(num) || num < 1) {
+      alert("Please enter a valid Contact ID (positive number).");
+      return;
+    }
+    updateStatus("waiting", num, reason || undefined);
   }
 
   async function deleteTask() {
     if (!window.confirm("Delete this task?")) return;
     setDeleting(true);
     try {
-      await TasksAPI.delete(task.id);
+      await TasksAPI.delete(taskId);
       onDeleted();
     } catch (err) {
-      alert("Error deleting task: " + (err as any).message);
+      alert("Error deleting task: " + (err instanceof Error ? err.message : "Unknown error"));
     } finally {
       setDeleting(false);
     }
   }
 
-  return (
-    <div
-      style={{
-        border: "1px solid #eee",
-        borderRadius: 12,
-        padding: 12,
-        marginBottom: 10,
-        background: "#fafafa",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: 12,
-          alignItems: "flex-start",
-        }}
-      >
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 700, fontSize: 16 }}>{task.title}</div>
-          <div style={{ fontSize: 13, opacity: 0.8 }}>
-            {task.category} • {task.urgency}
-          </div>
-        </div>
+  const statusChipClass = task.status === "active" ? "chip-active" : task.status === "waiting" ? "chip-waiting" : "chip-completed";
 
-        <div style={{ display: "flex", gap: 8 }}>
+  return (
+    <div className="card card-body">
+      <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div style={{ flex: "1", minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: "1rem", marginBottom: "0.25rem" }}>{task.title}</div>
+          {task.deadline && (
+            <div style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
+              Deadline: {new Date(task.deadline).toLocaleString()}
+            </div>
+          )}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+          <span className={`chip ${statusChipClass}`}>{task.status}</span>
           <select
+            className="input"
             value={task.status}
-            onChange={(e) => updateStatus(e.target.value as TaskStatus)}
+            onChange={handleStatusChange}
             disabled={updating || deleting}
-            style={{ padding: 8, borderRadius: 4, border: "1px solid #ccc" }}
+            style={{ width: "auto", minWidth: "110px" }}
           >
-            <option value="Active">Active</option>
-            <option value="Waiting">Waiting</option>
-            <option value="Completed">Completed</option>
+            <option value="active">Active</option>
+            <option value="waiting">Waiting</option>
+            <option value="completed">Completed</option>
           </select>
-          <button
-            onClick={deleteTask}
-            disabled={deleting}
-            style={{
-              padding: "8px 12px",
-              background: "#ff5252",
-              color: "white",
-              border: "none",
-              borderRadius: 4,
-              cursor: deleting ? "not-allowed" : "pointer",
-              opacity: deleting ? 0.6 : 1,
-            }}
-          >
-            {deleting ? "Deleting..." : "Delete"}
+          <button type="button" className="btn btn-danger" onClick={deleteTask} disabled={deleting}>
+            {deleting ? "Deleting…" : "Delete"}
           </button>
         </div>
       </div>
 
-      <p style={{ marginTop: 8, opacity: 0.9 }}>{task.description}</p>
+      {task.description && (
+        <p style={{ margin: "0.75rem 0 0", color: "var(--text-muted)", fontSize: "0.9375rem" }}>{task.description}</p>
+      )}
 
-      {task.status === "Waiting" && (
+      {pendingWaiting && (
+        <div className="card card-body" style={{ marginTop: "1rem", background: "var(--bg)" }}>
+          <div style={{ fontSize: "0.875rem", fontWeight: 600, marginBottom: "0.5rem" }}>Set to Waiting — enter contact</div>
+          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div className="input-group" style={{ marginBottom: 0, flex: "1", minWidth: "120px" }}>
+              <label>Contact ID *</label>
+              <input
+                type="number"
+                className="input"
+                min={1}
+                value={contactId}
+                onChange={(e) => setContactId(e.target.value)}
+                placeholder="e.g. 1"
+                disabled={updating}
+              />
+            </div>
+            <div className="input-group" style={{ marginBottom: 0, flex: "2", minWidth: "140px" }}>
+              <label>Reason (optional)</label>
+              <input
+                type="text"
+                className="input"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Why waiting?"
+                disabled={updating}
+              />
+            </div>
+            <button type="button" className="btn btn-primary" onClick={submitWaiting} disabled={updating}>
+              Confirm Waiting
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={() => setPendingWaiting(false)} disabled={updating}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {task.status === "waiting" && !pendingWaiting && (
         <div
           style={{
-            marginTop: 10,
-            padding: 10,
-            borderRadius: 10,
-            background: "#fff8e1",
-            borderLeft: "4px solid #FFC107",
+            marginTop: "1rem",
+            padding: "0.75rem 1rem",
+            borderRadius: "var(--radius-sm)",
+            background: "rgba(217, 119, 6, 0.08)",
+            borderLeft: "4px solid var(--status-waiting)",
           }}
         >
-          <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
-            Waiting Duration:{" "}
-            <b>{waitingISO ? formatDuration(waitingMs) : "—"}</b>
+          <div style={{ fontSize: "0.8125rem", color: "var(--text-muted)", marginBottom: "0.25rem" }}>
+            Waiting duration: <strong style={{ color: "var(--text)" }}>{waitingISO ? formatDuration(waitingMs) : "—"}</strong>
           </div>
-
-          {/* Waiting Details (person/department contact) */}
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <input
-              placeholder="Contact / Department"
-              value={task.waitingDetails?.contactName ?? ""}
-              onChange={(e) =>
-                updateWaitingDetails({
-                  ...(task.waitingDetails ?? {}),
-                  contactName: e.target.value,
-                })
-              }
-              disabled={updating}
-              style={{
-                padding: 6,
-                borderRadius: 4,
-                border: "1px solid #ddd",
-                flex: 1,
-                minWidth: 150,
-              }}
-            />
-            <input
-              placeholder="Phone (optional)"
-              value={task.waitingDetails?.contactPhone ?? ""}
-              onChange={(e) =>
-                updateWaitingDetails({
-                  ...(task.waitingDetails ?? {}),
-                  contactPhone: e.target.value,
-                })
-              }
-              disabled={updating}
-              style={{
-                padding: 6,
-                borderRadius: 4,
-                border: "1px solid #ddd",
-                flex: 1,
-                minWidth: 150,
-              }}
-            />
-            <input
-              placeholder="Department (optional)"
-              value={task.waitingDetails?.department ?? ""}
-              onChange={(e) =>
-                updateWaitingDetails({
-                  ...(task.waitingDetails ?? {}),
-                  department: e.target.value,
-                })
-              }
-              disabled={updating}
-              style={{
-                padding: 6,
-                borderRadius: 4,
-                border: "1px solid #ddd",
-                flex: 1,
-                minWidth: 150,
-              }}
-            />
-          </div>
+          {task.waiting_info && (
+            <div style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
+              Reason: {task.waiting_info.reason || "—"} · Contact ID: {task.waiting_info.contact_id ?? "—"}
+            </div>
+          )}
         </div>
       )}
     </div>
