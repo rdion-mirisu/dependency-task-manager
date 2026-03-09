@@ -16,28 +16,43 @@ export function TaskCard({
   const [updating, setUpdating] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
   const [pendingWaiting, setPendingWaiting] = React.useState(false);
-  const [contactId, setContactId] = React.useState("");
+  const [contactName, setContactName] = React.useState("");
+  const [department, setDepartment] = React.useState("");
+  const [contactPhone, setContactPhone] = React.useState("");
   const [reason, setReason] = React.useState("");
+  const [toast, setToast] = React.useState<string | null>(null);
 
   const waitingISO = task.waiting_started_at ?? null;
   const waitingMs = task.status === "waiting" && waitingISO ? now - Date.parse(waitingISO) : 0;
   const taskId = String(task.id);
 
-  async function updateStatus(next: TaskStatus, contactIdNum?: number, reasonText?: string) {
+  async function updateStatus(
+    next: TaskStatus,
+    contact_name?: string,
+    department?: string,
+    contact_phone?: string,
+    waiting_reason?: string
+  ) {
     setUpdating(true);
     try {
-      const payload: { status: TaskStatus; contact_id?: number; reason?: string } = { status: next };
-      if (next === "waiting" && contactIdNum != null) {
-        payload.contact_id = contactIdNum;
-        if (reasonText != null) payload.reason = reasonText;
+      const payload: { status: TaskStatus; contact_name?: string; department?: string; contact_phone?: string; waiting_reason?: string } = { status: next };
+      if (next === "waiting") {
+        if (contact_name) payload.contact_name = contact_name;
+        if (department) payload.department = department;
+        if (contact_phone) payload.contact_phone = contact_phone;
+        if (waiting_reason) payload.waiting_reason = waiting_reason;
       }
       await TasksAPI.patch(taskId, payload);
       setPendingWaiting(false);
-      setContactId("");
+      setContactName("");
+      setDepartment("");
       setReason("");
+      setToast("Task is now Waiting");
+      setTimeout(() => setToast(null), 3000);
       onChanged();
     } catch (err) {
-      alert("Error updating status: " + (err instanceof Error ? err.message : "Unknown error"));
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      alert(msg);
     } finally {
       setUpdating(false);
     }
@@ -53,12 +68,17 @@ export function TaskCard({
   }
 
   function submitWaiting() {
-    const num = parseInt(contactId, 10);
-    if (Number.isNaN(num) || num < 1) {
-      alert("Please enter a valid Contact ID (positive number).");
+    if (!contactName.trim() || !department.trim() || !reason.trim()) {
+      alert("Name, department and reason are required for waiting");
       return;
     }
-    updateStatus("waiting", num, reason || undefined);
+    updateStatus(
+      "waiting",
+      contactName.trim(),
+      department.trim(),
+      contactPhone.trim() || undefined,
+      reason.trim()
+    );
   }
 
   async function deleteTask() {
@@ -81,6 +101,9 @@ export function TaskCard({
       <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "flex-start", flexWrap: "wrap" }}>
         <div style={{ flex: "1", minWidth: 0 }}>
           <div style={{ fontWeight: 700, fontSize: "1rem", marginBottom: "0.25rem" }}>{task.title}</div>
+          <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem" }}>
+            {task.category} · {task.urgency}
+          </div>
           {task.deadline && (
             <div style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
               Deadline: {new Date(task.deadline).toLocaleString()}
@@ -103,6 +126,7 @@ export function TaskCard({
           <button type="button" className="btn btn-danger" onClick={deleteTask} disabled={deleting}>
             {deleting ? "Deleting…" : "Delete"}
           </button>
+          {toast && <div className="toast toast-success" style={{ marginLeft: "1rem" }}>{toast}</div>}
         </div>
       </div>
 
@@ -112,22 +136,45 @@ export function TaskCard({
 
       {pendingWaiting && (
         <div className="card card-body" style={{ marginTop: "1rem", background: "var(--bg)" }}>
-          <div style={{ fontSize: "0.875rem", fontWeight: 600, marginBottom: "0.5rem" }}>Set to Waiting — enter contact</div>
+          <div style={{ fontSize: "0.875rem", fontWeight: 600, marginBottom: "0.5rem" }}>
+            Set to Waiting — enter contact info
+          </div>
           <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "flex-end" }}>
             <div className="input-group" style={{ marginBottom: 0, flex: "1", minWidth: "120px" }}>
-              <label>Contact ID *</label>
+              <label>Contact Name *</label>
               <input
-                type="number"
+                type="text"
                 className="input"
-                min={1}
-                value={contactId}
-                onChange={(e) => setContactId(e.target.value)}
-                placeholder="e.g. 1"
+                value={contactName}
+                onChange={(e) => setContactName(e.target.value)}
+                placeholder="Name"
+                disabled={updating}
+              />
+            </div>
+            <div className="input-group" style={{ marginBottom: 0, flex: "1", minWidth: "120px" }}>
+              <label>Department *</label>
+              <input
+                type="text"
+                className="input"
+                value={department}
+                onChange={(e) => setDepartment(e.target.value)}
+                placeholder="Dept."
+                disabled={updating}
+              />
+            </div>
+            <div className="input-group" style={{ marginBottom: 0, flex: "1", minWidth: "120px" }}>
+              <label>Phone</label>
+              <input
+                type="tel"
+                className="input"
+                value={contactPhone}
+                onChange={(e) => setContactPhone(e.target.value)}
+                placeholder="e.g. +15551234567"
                 disabled={updating}
               />
             </div>
             <div className="input-group" style={{ marginBottom: 0, flex: "2", minWidth: "140px" }}>
-              <label>Reason (optional)</label>
+              <label>Reason *</label>
               <input
                 type="text"
                 className="input"
@@ -137,7 +184,7 @@ export function TaskCard({
                 disabled={updating}
               />
             </div>
-            <button type="button" className="btn btn-primary" onClick={submitWaiting} disabled={updating}>
+            <button type="button" className="btn btn-primary" onClick={submitWaiting} disabled={updating || !contactName || !department || !reason}>
               Confirm Waiting
             </button>
             <button type="button" className="btn btn-ghost" onClick={() => setPendingWaiting(false)} disabled={updating}>
@@ -162,7 +209,7 @@ export function TaskCard({
           </div>
           {task.waiting_info && (
             <div style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
-              Reason: {task.waiting_info.reason || "—"} · Contact ID: {task.waiting_info.contact_id ?? "—"}
+              Reason: {task.waiting_info.reason || "—"} · Contact: {task.waiting_info.contact_name || "—"} · Dept: {task.waiting_info.department || "—"}
             </div>
           )}
         </div>

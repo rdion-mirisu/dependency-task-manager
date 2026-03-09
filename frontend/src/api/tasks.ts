@@ -2,13 +2,16 @@ export type TaskStatus = "active" | "waiting" | "completed";
 
 export type WaitingInfo = {
   reason?: string;
-  contact_id?: number | null;
+  contact_name?: string;
+  department?: string;
   wait_start_per_date?: string;
 };
 
 export type Task = {
   id: number | string;
   title: string;
+  category: string;
+  urgency: string;
   description: string | null;
   status: TaskStatus;
   deadline?: string | null;
@@ -20,30 +23,40 @@ export type Task = {
 
 export type CreateTaskPayload = {
   title: string;
-  description?: string;
+  category: string;
+  urgency: string;
+  description: string;
   status?: TaskStatus; // default to "active" on server
   deadline?: string | null;
 };
 
 export type PatchTaskPayload = Partial<{
   title: string;
+  category: string;
+  urgency: string;
   description: string | null;
   status: TaskStatus;
   deadline: string | null;
-  contact_id: number;
-  reason: string;
+  contact_name: string;
+  department: string;
+  waiting_reason: string;
 }>;
 
-// Simple in-memory auth token store.
-// The login helper below will set this, and all requests will
-// automatically include it while the app is running.
-let authToken: string | null = null;
-
+// token is persisted in localStorage; the axios interceptor
+// will append it to each request.  This helper mirrors the
+// previous behaviour so callers don't need to change.
 export function setAuthToken(token: string | null) {
-  authToken = token;
+  if (token) {
+    localStorage.setItem("token", token);
+  } else {
+    localStorage.removeItem("token");
+  }
 }
 
 const API_BASE = process.env.REACT_APP_API_BASE_URL ?? "";
+
+import client from "./client";
+import axios from "axios";
 
 function getNetworkErrorMessage(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
@@ -58,34 +71,36 @@ function getNetworkErrorMessage(err: unknown): string {
   return msg;
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  let res: Response;
+// helper that mimics the old fetch-based API for simplicity
+async function request<T>(path: string, options: { method?: string; headers?: any; body?: any } = {}): Promise<T> {
   try {
-    res = await fetch(`${API_BASE}${path}`, {
-      headers: {
-        "Content-Type": "application/json",
-        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-        ...(options.headers ?? {}),
-      },
-      ...options,
+    const response = await client.request<T>({
+      url: path,
+      method: options.method as any,
+      data: options.body,
+      headers: options.headers,
     });
-  } catch (err) {
+    return response.data;
+  } catch (err: unknown) {
+    if (axios.isAxiosError(err)) {
+      if (err.response) {
+        let message = "";
+        const data = err.response.data;
+        if (data && typeof data === "object" && typeof data.message === "string") {
+          message = data.message;
+        } else if (typeof data === "string") {
+          message = data;
+        } else {
+          message = err.response.statusText;
+        }
+        throw new Error(message);
+      }
+      if (err.request) {
+        throw new Error(getNetworkErrorMessage(err));
+      }
+    }
     throw new Error(getNetworkErrorMessage(err));
   }
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    let message = text || res.statusText;
-    try {
-      const json = JSON.parse(text);
-      if (typeof json.message === "string") message = json.message;
-    } catch {
-      // use text as-is
-    }
-    throw new Error(message);
-  }
-
-  return res.json() as Promise<T>;
 }
 
 // --- Auth helpers (login & register) ---

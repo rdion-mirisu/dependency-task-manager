@@ -3,11 +3,18 @@ from flask_migrate import Migrate
 from flask_cors import CORS
 from dotenv import load_dotenv
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import func
+import logging
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 import json
+
+# logger setup
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
 
 from models import db, User, Task, Contact, WaitingDetail
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, get_jwt
@@ -75,7 +82,9 @@ def login():
     if user and user.check_password(data['password']):
         access_token = create_access_token(
             identity=str(user.id),
-            additional_claims={"is_admin": bool(user.is_admin)}
+            additional_claims={"is_admin": bool(user.is_admin)},
+            # force a longer expiry for development purposes
+            expires_delta=timedelta(hours=24)
         )
         return jsonify({"access_token": access_token}), 200
     else:
@@ -90,25 +99,51 @@ def protected():
 
 # POST /api/tasks IMPLLEMENTATION
 
+
+# simulated SMS notification stub; replace with a live Twilio API call in production
+# this requires no changes to the surrounding architecture.
+# use our module-level logger instead of the root logger
+
+def simulate_sms(phone_number: str, message: str) -> None:
+    logger.info(f"SMS notification triggered for contact {phone_number}  MESSAGE: {message}")
+
+
 @app.route("/api/tasks", methods=["POST"])
 @jwt_required()
 def create_task():
     current_user_id = get_jwt_identity()
     data = request.get_json()
 
-    if not data or not data.get('title'):
-        return jsonify({"message": "Title is required"}), 400
+    # validate required fields
+    if not data:
+        return jsonify({"message": "Missing request body"}), 400
+
+    title = (data.get('title') or '').strip()
+    category = (data.get('category') or '').strip()
+    urgency = (data.get('urgency') or '').strip()
+    description = (data.get('description') or '').strip()
+
+    if not title:
+        return jsonify({"message": "Title is required"}), 422
+    if not category:
+        return jsonify({"message": "Category is required"}), 422
+    if not urgency:
+        return jsonify({"message": "Urgency is required"}), 422
+    if not description:
+        return jsonify({"message": "Description is required"}), 422
 
     try:
         new_task = Task(
-            title=data.get('title'),
-            description=data.get('description', ''),
+            title=title,
+            category=category,
+            urgency=urgency,
+            description=description,
             status=data.get('status', 'active'),
             user_id=current_user_id,
             deadline=data.get('deadline') and datetime.fromisoformat(data.get('deadline'))
         )
 
-        # if we are creating a task already in waiting state, record start
+        # if creating already waiting, we must record contact details
         if new_task.status == 'waiting':
             new_task.waiting_started_at = datetime.utcnow()
 
@@ -116,25 +151,30 @@ def create_task():
         db.session.flush()
 
         if new_task.status == 'waiting':
-            contact_id = data.get('contact_id')
-            reason = data.get('reason')
-            
-            if not contact_id:
-                return jsonify({"message": "Waiting tasks require a contact_id"}), 400
-                
+            contact_name = (data.get('contact_name') or '').strip()
+            department = (data.get('department') or '').strip()
+            waiting_reason = (data.get('waiting_reason') or '').strip() or 'No reason provided'
+            contact_phone = (data.get('contact_phone') or '').strip()
+            if not contact_name or not department:
+                return jsonify({"message": "Contact name and department are required for waiting"}), 422
             waiting_info = WaitingDetail(
                 task_id=new_task.id,
-                contact_id=contact_id,
-                reason=reason,
+                contact_name=contact_name,
+                department=department,
+                reason=waiting_reason,
                 wait_start_per_date=new_task.waiting_started_at
             )
             db.session.add(waiting_info)
+            # keep phone for notification use later
+            data['contact_phone'] = contact_phone
 
         db.session.commit()
         # Return full task so frontend can add it to state without refetching
         task_data = {
             "id": new_task.id,
             "title": new_task.title,
+            "category": new_task.category,
+            "urgency": new_task.urgency,
             "description": new_task.description,
             "status": new_task.status,
             "deadline": new_task.deadline.isoformat() if new_task.deadline else None,
@@ -146,9 +186,16 @@ def create_task():
         if new_task.waiting_info:
             task_data["waiting_info"] = {
                 "reason": new_task.waiting_info.reason,
-                "contact_id": new_task.waiting_info.contact_id,
+                "contact_name": new_task.waiting_info.contact_name,
+                "department": new_task.waiting_info.department,
                 "wait_start_per_date": new_task.waiting_info.wait_start_per_date.isoformat(),
             }
+
+        # send simulated SMS if phone number was provided in request
+        contact_phone = (data.get('contact_phone') or '').strip()
+        if contact_phone:
+            simulate_sms(contact_phone, f"Your task {new_task.title} has been created and assigned to you.")
+
         return jsonify({"message": "Task created successfully", "task_id": new_task.id, "task": task_data}), 201
 
     except Exception as e:
@@ -177,6 +224,8 @@ def get_tasks():
         task_data = {
             "id": task.id,
             "title": task.title,
+            "category": task.category,
+            "urgency": task.urgency,
             "description": task.description,
             "status": task.status,
             "deadline": task.deadline.isoformat() if task.deadline else None,
@@ -189,7 +238,8 @@ def get_tasks():
         if task.waiting_info:
             task_data["waiting_info"] = {
                 "reason": task.waiting_info.reason,
-                "contact_id": task.waiting_info.contact_id,
+                "contact_name": task.waiting_info.contact_name,
+                "department": task.waiting_info.department,
                 "wait_start_per_date": task.waiting_info.wait_start_per_date.isoformat()
             }
 
@@ -213,21 +263,25 @@ def update_task_status(id):
         return jsonify({"message": "Status is required"}), 400
     
     try:
+        # perform status-change operations in a DB transaction
         if new_status == 'waiting' and task.status != 'waiting':
-            contact_id = data.get('contact_id')
-        
-            if not contact_id:
-                return jsonify({"message": "Waiting tasks require a contact_id"}), 400
-            
-            # start a new waiting period
+            # need contact info and a reason
+            contact_name = (data.get('contact_name') or '').strip()
+            department = (data.get('department') or '').strip()
+            waiting_reason = (data.get('waiting_reason') or '').strip() or 'No reason provided'
+            if not contact_name or not department:
+                return jsonify({"message": "contact_name and department are required when moving to waiting"}), 422
+
+            task.status = 'waiting'
             task.waiting_started_at = datetime.utcnow()
             task.waiting_ended_at = None
 
             new_waiting = WaitingDetail(
                 task_id=task.id,
-                contact_id=contact_id,
-                reason=data.get('reason', 'No reason provided'),
-                wait_start_per_date=task.waiting_started_at
+                contact_name=contact_name,
+                department=department,
+                reason=waiting_reason,
+                wait_start_per_date=task.waiting_started_at,
             )
             db.session.add(new_waiting)
 
@@ -236,17 +290,41 @@ def update_task_status(id):
             if task.waiting_info:
                 now = datetime.utcnow()
                 duration_td = now - task.waiting_info.wait_start_per_date
-                # record on task
                 if new_status == 'completed':
                     task.total_wait_duration = int(duration_td.total_seconds())
                 task.waiting_ended_at = now
+            task.status = new_status
+        else:
+            # simple status change with no waiting details
+            task.status = new_status
 
-        # finally update status and commit
-        task.status = new_status
         db.session.commit()
+
+        # build updated task object for return
+        task_data = {
+            "id": task.id,
+            "title": task.title,
+            "category": task.category,
+            "urgency": task.urgency,
+            "description": task.description,
+            "status": task.status,
+            "deadline": task.deadline.isoformat() if task.deadline else None,
+            "waiting_info": None,
+            "total_wait_duration": task.total_wait_duration,
+            "waiting_started_at": task.waiting_started_at.isoformat() if task.waiting_started_at else None,
+            "waiting_ended_at": task.waiting_ended_at.isoformat() if task.waiting_ended_at else None,
+        }
+        if task.waiting_info:
+            task_data["waiting_info"] = {
+                "reason": task.waiting_info.reason,
+                "contact_name": task.waiting_info.contact_name,
+                "department": task.waiting_info.department,
+                "wait_start_per_date": task.waiting_info.wait_start_per_date.isoformat(),
+            }
+
         return jsonify({
             "message": f"Task status updated to {new_status}",
-            "task_id": task.id
+            "task": task_data
         }), 200
     except Exception as e:
         db.session.rollback()
@@ -265,12 +343,15 @@ def get_task_details(id):
     task_data = {
         "id": task.id,
         "title": task.title,
+        "category": task.category,
+        "urgency": task.urgency,
         "description": task.description,
         "status": task.status,
         "deadline": task.deadline.isoformat() if task.deadline else None,
         "waiting_info": {
             "reason": task.waiting_info.reason if task.waiting_info else None,
-            "contact_id": task.waiting_info.contact_id if task.waiting_info else None,
+            "contact_name": task.waiting_info.contact_name if task.waiting_info else None,
+            "department": task.waiting_info.department if task.waiting_info else None,
             "wait_start_per_date": task.waiting_info.wait_start_per_date.isoformat() if task.waiting_info else None
         } if task.status == 'waiting' else None,
         "total_wait_duration": task.total_wait_duration,
@@ -344,35 +425,34 @@ def forward_task(id):
 @jwt_required()
 def get_average_wait():
     current_user_id = get_jwt_identity()
+    try:
+        # only include fully finished waiting periods on completed tasks
+        results = db.session.query(
+            WaitingDetail.contact_name.label('contact_name'),
+            func.count(Task.id).label('total_tasks'),
+            (func.avg(
+                func.extract('epoch', Task.waiting_ended_at - Task.waiting_started_at)
+            ) / 3600).label('average_wait_hours')
+        ).join(WaitingDetail, WaitingDetail.task_id == Task.id)
+        results = results.filter(
+            Task.user_id == current_user_id,
+            Task.status == 'completed',
+            Task.waiting_started_at != None,
+            Task.waiting_ended_at != None,
+        ).group_by(WaitingDetail.contact_name)
 
-    # join through WaitingDetail to Contact so we can report by contact name
-    results = db.session.query(
-        Contact.name.label('contact_name'),
-        func.count(Task.id).label('total_tasks'),
-        # calculate average duration in hours between waiting_started_at and waiting_ended_at
-        (func.avg(
-            func.extract('epoch', Task.waiting_ended_at - Task.waiting_started_at)
-        ) / 3600).label('average_wait_hours')
-    ).join(WaitingDetail, WaitingDetail.task_id == Task.id)
-    results = results.join(Contact, WaitingDetail.contact_id == Contact.id)
-    results = results.filter(
-        Task.user_id == current_user_id,
-        Task.status == 'completed',
-        Task.waiting_started_at != None,
-        Task.waiting_ended_at != None,
-    ).group_by(Contact.name)
-
-    stats = results.all()
-
-    output = []
-    for contact_name, total_tasks, avg_hours in stats:
-        output.append({
-            "contact_name": contact_name,
-            "average_wait_hours": float(avg_hours) if avg_hours is not None else None,
-            "total_tasks": total_tasks,
-        })
-
-    return jsonify(output), 200
+        stats = results.all()
+        output = []
+        for contact_name, total_tasks, avg_hours in stats:
+            output.append({
+                "contact_name": contact_name,
+                "average_wait_hours": float(avg_hours) if avg_hours is not None else None,
+                "total_tasks": total_tasks,
+            })
+        return jsonify(output), 200
+    except Exception as e:
+        logging.exception("analytics average-wait failed")
+        return jsonify({"detail": str(e)}), 500
 
 # ===== admin-only endpoints =====
 

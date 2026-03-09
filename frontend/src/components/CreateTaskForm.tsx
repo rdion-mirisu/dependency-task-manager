@@ -1,80 +1,112 @@
 import React from "react";
+import { useForm } from "react-hook-form";
 import { TasksAPI, CreateTaskPayload, Task } from "../api/tasks";
 
-export function CreateTaskForm({ onCreated }: { onCreated: (task: Task) => void }) {
-  const [title, setTitle] = React.useState("");
-  const [description, setDescription] = React.useState("");
-  const [deadline, setDeadline] = React.useState<string | null>(null);
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
+type FormData = {
+  title: string;
+  category: string;
+  urgency: string;
+  description: string;
+  deadline?: string;
+};
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    if (!title.trim()) {
-      setError("Title is required");
-      return;
-    }
-    setLoading(true);
+export function CreateTaskForm({ onCreated }: { onCreated: (task: Task) => void }) {
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+    reset,
+  } = useForm<FormData>({
+    defaultValues: { title: "", category: "", urgency: "", description: "", deadline: "" },
+  });
+
+  const [apiError, setApiError] = React.useState<string | null>(null);
+
+  const onSubmit = async (data: FormData) => {
+    setApiError(null);
     try {
       const payload: CreateTaskPayload = {
-        title: title.trim(),
-        description: description.trim() || undefined,
+        title: data.title.trim(),
+        category: data.category.trim(),
+        urgency: data.urgency.trim(),
+        description: data.description.trim(),
         status: "active",
-        deadline: deadline ? new Date(deadline).toISOString() : null,
+        deadline: data.deadline ? new Date(data.deadline).toISOString() : null,
       };
       const created = await TasksAPI.create(payload);
       onCreated(created);
-      setTitle("");
-      setDescription("");
-      setDeadline(null);
+      reset();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create task");
-    } finally {
-      setLoading(false);
+      setApiError(err instanceof Error ? err.message : "Failed to create task");
     }
-  }
+  };
 
   return (
-    <form onSubmit={handleSubmit}>
-      <h2 style={{ margin: "0 0 1rem", fontSize: "1.125rem", fontWeight: 700 }}>Create New Task</h2>
-      {error && <div className="alert alert-error">{error}</div>}
+    <form onSubmit={handleSubmit(onSubmit)}>
+      <h2 style={{ margin: "0 0 1rem", fontSize: "1.125rem", fontWeight: 700 }}>
+        Create New Task
+      </h2>
+      {apiError && <div className="alert alert-error">{apiError}</div>}
 
       <div className="input-group">
         <label>Title *</label>
         <input
           type="text"
           className="input"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          disabled={loading}
+          {...register("title", { required: "Title is required" })}
+          disabled={isSubmitting}
           placeholder="What needs to be done?"
-          required
         />
+        {errors.title && <div className="alert alert-error">{errors.title.message}</div>}
       </div>
+
       <div className="input-group">
-        <label>Description</label>
+        <label>Category *</label>
+        <input
+          type="text"
+          className="input"
+          {...register("category", { required: "Category is required" })}
+          disabled={isSubmitting}
+          placeholder="e.g. work, personal"
+        />
+        {errors.category && <div className="alert alert-error">{errors.category.message}</div>}
+      </div>
+
+      <div className="input-group">
+        <label>Urgency *</label>
+        <input
+          type="text"
+          className="input"
+          {...register("urgency", { required: "Urgency is required" })}
+          disabled={isSubmitting}
+          placeholder="low, medium, high"
+        />
+        {errors.urgency && <div className="alert alert-error">{errors.urgency.message}</div>}
+      </div>
+
+      <div className="input-group">
+        <label>Description *</label>
         <textarea
           className="input"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          disabled={loading}
+          {...register("description", { required: "Description is required" })}
+          disabled={isSubmitting}
           placeholder="Add more details…"
           rows={3}
         />
+        {errors.description && <div className="alert alert-error">{errors.description.message}</div>}
       </div>
+
       <div className="input-group">
         <label>Deadline (optional)</label>
         <input
           type="datetime-local"
           className="input"
-          value={deadline ?? ""}
-          onChange={(e) => setDeadline(e.target.value || null)}
-          disabled={loading}
+          {...register("deadline")}
+          disabled={isSubmitting}
         />
       </div>
-      <button type="submit" className="btn btn-primary" disabled={loading}>
-        {loading ? "Creating…" : "Create Task"}
+      <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
+        {isSubmitting ? "Creating…" : "Create Task"}
       </button>
     </form>
   );

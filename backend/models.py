@@ -36,7 +36,11 @@ class User(db.Model):
 class Task(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)
-    description = db.Column(db.Text, nullable=True)
+    # added for TS1/TC3-5
+    category = db.Column(db.String(100), nullable=False)
+    urgency = db.Column(db.String(50), nullable=False)
+    # description is now required as well
+    description = db.Column(db.Text, nullable=False)
     status = db.Column(db.String(20), nullable=False, default='active')
     # duration in seconds when a task has been in waiting state
     total_wait_duration = db.Column(db.Integer, nullable=True)
@@ -64,6 +68,8 @@ class Contact(db.Model):
 class WaitingDetail(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     task_id = db.Column(db.Integer, db.ForeignKey('task.id'))
-    contact_id = db.Column(db.Integer, db.ForeignKey('contact.id'))
-    reason = db.Column(db.String(255))
+    # store contact information directly for simplicity
+    contact_name = db.Column(db.String(100), nullable=False)
+    department = db.Column(db.String(100), nullable=False)
+    reason = db.Column(db.String(255), nullable=False)
     wait_start_per_date = db.Column(db.DateTime, default=datetime.utcnow)
