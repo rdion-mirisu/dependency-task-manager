@@ -5,6 +5,4 @@ Flask-JWT-Extended==4.4.4
 python-dotenv==1.0.0
 SQLAlchemy==2.0.20
 psycopg2-binary==2.9.7
-google-auth-oauthlib==1.0.0
-google-api-python-client==2.99.0
 icalendar==4.1.0

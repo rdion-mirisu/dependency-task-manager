@@ -77,16 +77,14 @@ The backend now offers several helpful routes:
 * **JWT-protected analytics**
   * `GET /api/analytics/average-wait` – returns an array grouped by contact name with `contact_name`, `average_wait_hours`, and `total_tasks`. Only completed tasks with both waiting start/end timestamps are included.
 
-* **Google Calendar integration** (requires a `client_secret.json` from Google and appropriate env variables):
-  * `GET /api/integration/google/oauth` – returns an authorization URL; the frontend should redirect the user to this address.
-  * `POST /api/integration/google/oauth` – accept a `code` from the frontend, exchange it for tokens, and store them for the currently authenticated user.
-  * `GET /api/integration/google/callback` – redirect URI for Google; forwards the authorization code back to the frontend dashboard.
-  * `GET /api/integration/google/sync` – creates calendar events for every task with a deadline, refreshing tokens automatically when expired.
-
 * **iCal export**
   * `GET /api/integration/ical/export` – returns a `.ics` file containing the current user's tasks that have a deadline. Events use the task title/description as summary/description.
 
-Update the environment with `GOOGLE_REDIRECT_URI` and `FRONTEND_URL` as appropriate.  You should also update the database with the latest migrations after modifying the models.
+* **Task history**
+  * `GET /api/tasks/<id>/history` – JWT-protected; returns a list of history entries for the given task (only accessible to the task owner).
+  * `GET /api/admin/history` – JWT-protected **admin only**; returns history entries for all tasks, including task title and actor username.
+
+You should update the database with the latest migrations after modifying the models.
 
 ### Frontend notes
 
@@ -102,7 +100,7 @@ logged in:
 
 * **Dashboard** – original task list/creation UI.
 * **Analytics** – average wait per contact with a bar chart and table.
-* **Calendar** – buttons to connect Google Calendar, sync tasks, or export an
+* **Calendar** – displays deadlines in a monthly view and supports exporting an
   iCal file.
 * **Admin** – only visible if your JWT includes `is_admin: true`; shows a
   table of all tasks along with status controls and an SMS modal.

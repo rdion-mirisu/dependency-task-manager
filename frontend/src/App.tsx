@@ -9,13 +9,15 @@ import {
 } from "react-router-dom";
 import { Dashboard } from "./components/Dashboard";
 import { AnalyticsPage } from "./components/AnalyticsPage";
+import { ContactsPage } from "./components/ContactsPage";
+import { CategoriesPage } from "./components/CategoriesPage";
+import { TaskDetail } from "./components/TaskDetail";
 import { AdminPanel } from "./components/AdminPanel";
 import { CalendarPage } from "./components/CalendarPage";
 import {
   login,
   registerUser,
   setAuthToken,
-  IntegrationAPI,
   getIsAdmin,
 } from "./api/tasks";
 
@@ -42,14 +44,6 @@ function App() {
       } catch {
         // ignore
       }
-    }
-    const params = new URLSearchParams(location.search);
-    const code = params.get("code");
-    if (code) {
-      IntegrationAPI.finalizeGoogle(code).catch((e) => {
-        console.error("OAuth finalize failed", e);
-      });
-      navigate(location.pathname, { replace: true });
     }
   }, [token, location, navigate]);
 
@@ -167,6 +161,8 @@ function App() {
       {token && (
         <nav className="app-nav">
           <Link to="/dashboard">Dashboard</Link>
+          <Link to="/categories">Categories</Link>
+          <Link to="/contacts">Contacts</Link>
           <Link to="/analytics">Analytics</Link>
           <Link to="/calendar">Calendar</Link>
           {isAdmin && <Link to="/admin">Admin</Link>}
@@ -179,8 +175,11 @@ function App() {
       <Routes>
         <Route path="/login" element={token ? <Navigate to="/dashboard" /> : loginFormEl} />
         <Route path="/dashboard" element={token ? <Dashboard /> : <Navigate to="/login" />} />
+        <Route path="/categories" element={token ? <CategoriesPage /> : <Navigate to="/login" />} />
+        <Route path="/contacts" element={token ? <ContactsPage /> : <Navigate to="/login" />} />
         <Route path="/analytics" element={token ? <AnalyticsPage /> : <Navigate to="/login" />} />
         <Route path="/calendar" element={token ? <CalendarPage /> : <Navigate to="/login" />} />
+        <Route path="/tasks/:id" element={token ? <TaskDetail /> : <Navigate to="/login" />} />
         <Route
           path="/admin"
           element={

@@ -1,5 +1,6 @@
 import React from "react";
 import { TasksAPI, Task, TaskStatus } from "../api/tasks";
+import { Link } from "react-router-dom";
 import { useNow } from "../utils/useNow";
 import { formatDuration } from "../utils/waitingTime";
 
@@ -82,6 +83,8 @@ export function TaskCard({
   }
 
   async function deleteTask() {
+    // deletion endpoint does not care about whether the task is assigned to a
+    // category; we send only the id and let the server handle it.
     if (!window.confirm("Delete this task?")) return;
     setDeleting(true);
     try {
@@ -96,124 +99,65 @@ export function TaskCard({
 
   const statusChipClass = task.status === "active" ? "chip-active" : task.status === "waiting" ? "chip-waiting" : "chip-completed";
 
+  // determine badge color for priority
+  const priorityColor = task.priority === "High" ? "#e74c3c" : task.priority === "Medium" ? "#f1c40f" : "#7f8c8d";
+
   return (
-    <div className="card card-body">
-      <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "flex-start", flexWrap: "wrap" }}>
-        <div style={{ flex: "1", minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: "1rem", marginBottom: "0.25rem" }}>{task.title}</div>
-          <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem" }}>
-            {task.category} · {task.urgency}
-          </div>
-          {task.deadline && (
-            <div style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
-              Deadline: {new Date(task.deadline).toLocaleString()}
-            </div>
-          )}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-          <span className={`chip ${statusChipClass}`}>{task.status}</span>
-          <select
-            className="input"
-            value={task.status}
-            onChange={handleStatusChange}
-            disabled={updating || deleting}
-            style={{ width: "auto", minWidth: "110px" }}
-          >
-            <option value="active">Active</option>
-            <option value="waiting">Waiting</option>
-            <option value="completed">Completed</option>
-          </select>
-          <button type="button" className="btn btn-danger" onClick={deleteTask} disabled={deleting}>
-            {deleting ? "Deleting…" : "Delete"}
-          </button>
-          {toast && <div className="toast toast-success" style={{ marginLeft: "1rem" }}>{toast}</div>}
-        </div>
+    <div className="card card-body" style={{ borderLeft: "4px solid " + task.color_code }}>
+      {toast && <div className="toast toast-success" style={{ marginBottom: '0.5rem' }}>{toast}</div>}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Link to={`/tasks/${taskId}`} style={{ fontSize: '1.125rem', fontWeight: 600, textDecoration: 'none', color: 'var(--text)' }}>
+          {task.title}
+        </Link>
+        <div className={statusChipClass}>{task.status}</div>
       </div>
-
-      {task.description && (
-        <p style={{ margin: "0.75rem 0 0", color: "var(--text-muted)", fontSize: "0.9375rem" }}>{task.description}</p>
-      )}
-
-      {pendingWaiting && (
-        <div className="card card-body" style={{ marginTop: "1rem", background: "var(--bg)" }}>
-          <div style={{ fontSize: "0.875rem", fontWeight: 600, marginBottom: "0.5rem" }}>
-            Set to Waiting — enter contact info
-          </div>
-          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "flex-end" }}>
-            <div className="input-group" style={{ marginBottom: 0, flex: "1", minWidth: "120px" }}>
-              <label>Contact Name *</label>
-              <input
-                type="text"
-                className="input"
-                value={contactName}
-                onChange={(e) => setContactName(e.target.value)}
-                placeholder="Name"
-                disabled={updating}
-              />
-            </div>
-            <div className="input-group" style={{ marginBottom: 0, flex: "1", minWidth: "120px" }}>
-              <label>Department *</label>
-              <input
-                type="text"
-                className="input"
-                value={department}
-                onChange={(e) => setDepartment(e.target.value)}
-                placeholder="Dept."
-                disabled={updating}
-              />
-            </div>
-            <div className="input-group" style={{ marginBottom: 0, flex: "1", minWidth: "120px" }}>
-              <label>Phone</label>
-              <input
-                type="tel"
-                className="input"
-                value={contactPhone}
-                onChange={(e) => setContactPhone(e.target.value)}
-                placeholder="e.g. +15551234567"
-                disabled={updating}
-              />
-            </div>
-            <div className="input-group" style={{ marginBottom: 0, flex: "2", minWidth: "140px" }}>
-              <label>Reason *</label>
-              <input
-                type="text"
-                className="input"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="Why waiting?"
-                disabled={updating}
-              />
-            </div>
-            <button type="button" className="btn btn-primary" onClick={submitWaiting} disabled={updating || !contactName || !department || !reason}>
-              Confirm Waiting
-            </button>
-            <button type="button" className="btn btn-ghost" onClick={() => setPendingWaiting(false)} disabled={updating}>
-              Cancel
-            </button>
-          </div>
+      <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+        {task.category}{task.category_id ? ` (#${task.category_id})` : ''} · {task.urgency}
+      </div>
+      {task.status === 'waiting' && (
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+          Waiting {formatDuration(waitingMs)}
         </div>
       )}
 
-      {task.status === "waiting" && !pendingWaiting && (
-        <div
-          style={{
-            marginTop: "1rem",
-            padding: "0.75rem 1rem",
-            borderRadius: "var(--radius-sm)",
-            background: "rgba(217, 119, 6, 0.08)",
-            borderLeft: "4px solid var(--status-waiting)",
-          }}
-        >
-          <div style={{ fontSize: "0.8125rem", color: "var(--text-muted)", marginBottom: "0.25rem" }}>
-            Waiting duration: <strong style={{ color: "var(--text)" }}>{waitingISO ? formatDuration(waitingMs) : "—"}</strong>
-          </div>
-          {task.waiting_info && (
-            <div style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
-              Reason: {task.waiting_info.reason || "—"} · Contact: {task.waiting_info.contact_name || "—"} · Dept: {task.waiting_info.department || "—"}
-            </div>
-          )}
-        </div>
-      )}
+      <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+        <select value={task.status} onChange={handleStatusChange} disabled={updating} className="input" style={{ width: 'auto' }}>
+          <option value="active">Active</option>
+          <option value="waiting">Waiting</option>
+          <option value="completed">Completed</option>
+        </select>
+        {pendingWaiting && (
+          <>
+            <input
+              type="text"
+              placeholder="Contact name"
+              value={contactName}
+              onChange={(e) => setContactName(e.target.value)}
+              className="input"
+            />
+            <input
+              type="text"
+              placeholder="Department"
+              value={department}
+              onChange={(e) => setDepartment(e.target.value)}
+              className="input"
+            />
+            <textarea
+              placeholder="Reason"
+              rows={1}
+              className="input"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+            <button className="btn btn-primary" onClick={submitWaiting} disabled={updating}>
+              Submit
+            </button>
+          </>
+        )}
+        <button className="btn btn-danger" onClick={deleteTask} disabled={deleting}>
+          Delete
+        </button>
+      </div>
     </div>
   );
 }
