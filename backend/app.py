@@ -3,7 +3,7 @@ from flask_migrate import Migrate
 from flask_cors import CORS
 from dotenv import load_dotenv
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import func
 import logging
 import json
@@ -19,7 +19,7 @@ class DeadlineValidator(BaseModel):
 
     @validator('deadline')
     def must_be_future(cls, v):
-        if v is not None and v < datetime.utcnow():
+        if v is not None and v < datetime.now(timezone.utc):
             raise ValueError("Deadline must be a future date.")
         return v
 
@@ -143,7 +143,8 @@ def create_task():
         return jsonify({"message": "Missing request body"}), 400
 
     title = (data.get('title') or '').strip()
-    urgency = (data.get('urgency') or '').strip()
+    # urgency is redundant with priority; default to whichever is provided
+    urgency = (data.get('urgency') or data.get('priority') or '').strip()
     description = (data.get('description') or '').strip()
 
     # category may be provided either by name or id; id takes precedence
@@ -170,8 +171,9 @@ def create_task():
         return jsonify({"message": "Title is required"}), 422
     if not category:
         return jsonify({"message": "Category is required"}), 422
+    # if still empty (e.g. neither urgency nor priority sent), default to Low
     if not urgency:
-        return jsonify({"message": "Urgency is required"}), 422
+        urgency = priority
     if not description:
         return jsonify({"message": "Description is required"}), 422
     if priority not in ('High', 'Medium', 'Low'):
@@ -184,8 +186,10 @@ def create_task():
             # parse to datetime first
             dt = datetime.fromisoformat(data.get('deadline'))
             validated_deadline = DeadlineValidator(deadline=dt).deadline
+    
     except ValidationError as ve:
-        return jsonify({"message": "Validation error", "errors": ve.errors()}), 422
+        # pydantic ValidationError contains objects; stringify for JSON
+        return jsonify({"message": "Validation error", "errors": str(ve)}), 422
 
     try:
         # assign contact_id if provided
@@ -315,7 +319,8 @@ def get_tasks():
             "title": task.title,
             "category": task.category,
             "category_id": task.category_id,
-            "urgency": task.urgency,
+            # always return priority so clients can drop urgency
+            "urgency": task.priority,
             "description": task.description,
             "status": task.status,
             "priority": task.priority,
@@ -341,33 +346,43 @@ def get_tasks():
     
     return jsonify({"tasks": task_list}), 200
 
-# PATCH /api/tasks/{id} IMPLEMENTATION
 @app.route("/api/tasks/<int:id>", methods=["PATCH"])
 @jwt_required()
 def update_task_status(id):
     current_user_id = get_jwt_identity()
     data = request.get_json()
+    import sys
+    print("PATCH PAYLOAD:", data, file=sys.stderr)
 
     task = Task.query.filter_by(id=id, user_id=current_user_id).first()
     if not task:
         return jsonify({"message": "Task not found"}), 404
     
+    # status is optional during patch; default to existing value
     new_status = data.get('status')
-    if not new_status:
-        return jsonify({"message": "Status is required"}), 400
-    # remember old status for history details
     old_status = task.status
-    
+    status_change = False
+    if new_status is None:
+        new_status = old_status
+    else:
+        status_change = True
+
     # deadline validation on update (if the client sent one)
     try:
         if data.get('deadline') is not None:
-            dt = datetime.fromisoformat(data.get('deadline'))
+            raw = data.get('deadline')
+            # replace Z with +00:00 for Python < 3.11 compatibility
+            raw = raw.replace('Z', '+00:00')
+            dt = datetime.fromisoformat(raw)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
             new_deadline = DeadlineValidator(deadline=dt).deadline
         else:
-            new_deadline = None
+            # no deadline sent — preserve existing value
+            new_deadline = task.deadline
     except ValidationError as ve:
-        return jsonify({"message": "Validation error", "errors": ve.errors()}), 422
-    
+        return jsonify({"message": "Validation error", "errors": str(ve)}), 422
+
     try:
         # category update by name or id
         if data.get('category_id') is not None:
@@ -381,29 +396,33 @@ def update_task_status(id):
             task.category_id = cat.id
             task.category = cat.name
         elif 'category' in data:
-            # simple name change; do not touch category_id
             task.category = (data.get('category') or '').strip() or task.category
 
         # update task.contact_id if provided
         if data.get('contact_id') is not None:
             task.contact_id = data.get('contact_id')
-            # also update waiting_info name when present
             if task.waiting_info:
                 contact = Contact.query.get(data.get('contact_id'))
                 if contact:
                     task.waiting_info.contact_name = contact.name
+
         # priority / color updates
         if data.get('priority') is not None:
             if data.get('priority') not in ('High', 'Medium', 'Low'):
                 return jsonify({"message": "Priority must be High, Medium or Low"}), 422
             task.priority = data.get('priority')
+            task.urgency = data.get('priority')
         if data.get('color_code') is not None:
-            # sanitize or default if missing
             task.color_code = data.get('color_code') or '#808080'
 
-        # perform status-change operations in a DB transaction
-        if new_status == 'waiting' and task.status != 'waiting':
-            # need contact info and a reason
+        # update title and description if provided
+        if data.get('title') is not None:
+            task.title = data.get('title').strip()
+        if data.get('description') is not None:
+            task.description = data.get('description').strip()
+
+        # perform status-change operations
+        if status_change and new_status == 'waiting' and task.status != 'waiting':
             contact_name = (data.get('contact_name') or '').strip()
             department = (data.get('department') or '').strip()
             waiting_reason = (data.get('waiting_reason') or '').strip() or 'No reason provided'
@@ -413,7 +432,6 @@ def update_task_status(id):
             task.status = 'waiting'
             task.waiting_started_at = datetime.utcnow()
             task.waiting_ended_at = None
-            # set contact_id if provided
             if data.get('contact_id') is not None:
                 task.contact_id = data.get('contact_id')
 
@@ -426,8 +444,7 @@ def update_task_status(id):
             )
             db.session.add(new_waiting)
 
-        elif task.status == 'waiting' and new_status != 'waiting':
-            # ending a waiting period
+        elif status_change and task.status == 'waiting' and new_status != 'waiting':
             if task.waiting_info:
                 now = datetime.utcnow()
                 duration_td = now - task.waiting_info.wait_start_per_date
@@ -435,25 +452,23 @@ def update_task_status(id):
                     task.total_wait_duration = int(duration_td.total_seconds())
                 task.waiting_ended_at = now
             task.status = new_status
-        else:
-            # simple status change with no waiting details
+        elif status_change:
             task.status = new_status
 
-        # apply deadline update if present (must be done before commit)
-        if data.get('deadline') is not None:
-            task.deadline = new_deadline
+        # always apply deadline
+        task.deadline = new_deadline
 
-        # record history for status change (include old value)
-        log_history(task.id, current_user_id, 'status_changed', f"{old_status} -> {new_status}")
+        # record history for status change
+        if status_change and old_status != new_status:
+            log_history(task.id, current_user_id, 'status_changed', f"{old_status} -> {new_status}")
 
         db.session.commit()
 
-        # build updated task object for return
         task_data = {
             "id": task.id,
             "title": task.title,
             "category": task.category,
-            "urgency": task.urgency,
+            "urgency": task.priority,
             "description": task.description,
             "status": task.status,
             "priority": task.priority,
@@ -481,7 +496,6 @@ def update_task_status(id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"message": "Error updating task status", "error": str(e)}), 500
-    
 
 # GET /api/tasks/{id} IMPLEMENTATION
 @app.route("/api/tasks/<int:id>", methods=["GET"])
@@ -498,7 +512,8 @@ def get_task_details(id):
         "title": task.title,
         "category": task.category,
         "category_id": task.category_id,
-        "urgency": task.urgency,
+        # mirror priority so UI only needs one value
+        "urgency": task.priority,
         "description": task.description,
         "status": task.status,
         "priority": task.priority,
@@ -890,14 +905,14 @@ def analytics_export_csv():
 
         si = StringIO()
         writer = csv.writer(si)
-        writer.writerow(["id","title","category","urgency","description","status","deadline","waiting_started_at","waiting_ended_at","total_wait_duration","contact_name","department","reason"])
+        writer.writerow(["id","title","category","priority","description","status","deadline","waiting_started_at","waiting_ended_at","total_wait_duration","contact_name","department","reason"])
         for t in tasks:
             wd = t.waiting_info
             writer.writerow([
                 t.id,
                 t.title,
                 t.category,
-                t.urgency,
+                t.priority,
                 t.description,
                 t.status,
                 t.deadline.isoformat() if t.deadline else "",

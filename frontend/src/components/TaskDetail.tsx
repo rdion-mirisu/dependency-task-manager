@@ -1,7 +1,6 @@
 import React from "react";
 import { useParams } from "react-router-dom";
-import { TasksAPI, ContactsAPI, CategoriesAPI, Contact as ContactType } from "../api/tasks";
-
+import { TasksAPI, ContactsAPI, CategoriesAPI, Contact as ContactType, Category } from "../api/tasks";
 
 export function TaskDetail() {
   const { id } = useParams<{ id: string }>();
@@ -18,9 +17,14 @@ export function TaskDetail() {
   const [forwardModal, setForwardModal] = React.useState<{ contactId?: number; note: string } | null>(null);
   const [toast, setToast] = React.useState<string | null>(null);
 
-  // editing priority/color
-  const [newPriority, setNewPriority] = React.useState<"High"|"Medium"|"Low">("Low");
-  const [newColor, setNewColor] = React.useState<string>("#808080");
+  // editing/ form state
+  const [editing, setEditing] = React.useState(false);
+  const [formTitle, setFormTitle] = React.useState<string>("");
+  const [formDescription, setFormDescription] = React.useState<string>("");
+  const [formDeadline, setFormDeadline] = React.useState<string>("");
+  const [formUrgency, setFormUrgency] = React.useState<string>("");
+  const [formPriority, setFormPriority] = React.useState<"High"|"Medium"|"Low">("Low");
+  const [formColor, setFormColor] = React.useState<string>("#808080");
 
   // history data
   const [history, setHistory] = React.useState<Array<any>>([]);
@@ -49,9 +53,6 @@ export function TaskDetail() {
     try {
       const res = await TasksAPI.get(id);
       setTask(res.task);
-      // prefills for editing
-      if (res.task.priority) setNewPriority(res.task.priority);
-      if (res.task.color_code) setNewColor(res.task.color_code);
       // prefer direct contact_id property if present, otherwise fall back to waiting_info
       const cid = res.task.contact_id ?? res.task.waiting_info?.contact_id;
       if (cid != null) {
@@ -133,6 +134,53 @@ export function TaskDetail() {
     }
   };
 
+  const startEditing = () => {
+    if (!task) return;
+    setFormTitle(task.title || "");
+    setFormDescription(task.description || "");
+    setFormDeadline(task.deadline ? new Date(task.deadline).toISOString().slice(0,16) : "");
+    setFormUrgency(task.urgency || task.priority);
+    setFormPriority(task.priority);
+    setFormColor(task.color_code || "#808080");
+    setSelectedCategoryId(task.category_id != null ? task.category_id : null);
+    setEditing(true);
+  };
+
+  const cancelEditing = () => {
+    setEditing(false);
+  };
+
+  const saveEdit = async () => {
+    if (!task) return;
+    try {
+      const payload: any = {};
+      if (formTitle !== task.title) payload.title = formTitle;
+      if (formDescription !== task.description) payload.description = formDescription;
+      if (formUrgency !== task.urgency) payload.urgency = formUrgency;
+      if (formPriority !== task.priority) payload.priority = formPriority;
+      if (formColor !== task.color_code) payload.color_code = formColor;
+      if ((selectedCategoryId ?? null) !== (task.category_id ?? null)) payload.category_id = selectedCategoryId;
+      if (formDeadline) {
+        const iso = new Date(formDeadline).toISOString();
+        if (iso !== task.deadline) payload.deadline = iso;
+      } else if (task.deadline) {
+        payload.deadline = null;
+      }
+      // always include status even if unchanged so backend logic remains simple
+      if (!('status' in payload)) {
+        payload.status = task.status;
+      }
+      await TasksAPI.patch(id!, payload);
+      setToast("Task updated");
+      setTimeout(() => setToast(null), 2000);
+      setEditing(false);
+      load();
+      window.dispatchEvent(new Event('tasks-changed'));
+    } catch (e) {
+      alert("Failed to update: " + (e instanceof Error ? e.message : ""));
+    }
+  };
+
   if (loading) return <p className="loading">Loading…</p>;
   if (error) return <div className="alert alert-error">{error}</div>;
   if (!task) return <div>Task not found</div>;
@@ -159,70 +207,117 @@ export function TaskDetail() {
         >
           {task.priority}
         </span>
-        <h2 style={{ margin: 0 }}>{task.title}</h2>
-        <p style={{ color: 'var(--text-muted)' }}>{task.category} · {task.urgency}</p>
-        {task.deadline && <p>Deadline: {new Date(task.deadline).toLocaleString()}</p>}
-        <p>{task.description}</p>
-
-        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center', marginTop: '1rem' }}>
-          <div className="input-group" style={{ marginBottom: 0 }}>
-            <label>Category</label>
-            <select
-              className="input"
-              value={selectedCategoryId ?? ''}
-              onChange={(e) => {
-                const v = e.target.value;
-                setSelectedCategoryId(v ? Number(v) : null);
-              }}
+        {editing ? (
+          <div>
+            <div className="input-group">
+              <label>Title</label>
+              <input
+                className="input"
+                value={formTitle}
+                onChange={(e) => setFormTitle(e.target.value)}
+              />
+            </div>
+            <div className="input-group">
+              <label>Description</label>
+              <textarea
+                className="input"
+                value={formDescription}
+                onChange={(e) => setFormDescription(e.target.value)}
+              />
+            </div>
+            <div className="input-group">
+              <label>Urgency</label>
+              <select
+                className="input"
+                value={formUrgency}
+                onChange={(e) => setFormUrgency(e.target.value)}
+              >
+                <option value="High">High</option>
+                <option value="Medium">Medium</option>
+                <option value="Low">Low</option>
+              </select>
+            </div>
+            <div className="input-group">
+              <label>Priority</label>
+              <select
+                className="input"
+                value={formPriority}
+                onChange={(e) => setFormPriority(e.target.value as any)}
+              >
+                <option value="High">High</option>
+                <option value="Medium">Medium</option>
+                <option value="Low">Low</option>
+              </select>
+            </div>
+            <div className="input-group">
+              <label>Deadline</label>
+              <input
+                type="datetime-local"
+                className="input"
+                value={formDeadline}
+                onChange={(e) => setFormDeadline(e.target.value)}
+              />
+            </div>
+            <div className="input-group">
+              <label>Category</label>
+              <select
+                className="input"
+                value={selectedCategoryId ?? ''}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setSelectedCategoryId(v ? Number(v) : null);
+                }}
+              >
+                <option value="">-- none --</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="input-group">
+              <label>Color</label>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                {['#e74c3c', '#f1c40f', '#7f8c8d', '#3498db', '#2ecc71', '#808080'].map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setFormColor(c)}
+                    style={{
+                      backgroundColor: c,
+                      width: '24px',
+                      height: '24px',
+                      border: formColor === c ? '2px solid #000' : '1px solid #ccc',
+                      borderRadius: '3px',
+                      cursor: 'pointer',
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+              <button className="btn btn-primary" onClick={saveEdit}>
+                Save
+              </button>
+              <button className="btn btn-secondary" onClick={cancelEditing}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <h2 style={{ margin: 0 }}>{task.title}</h2>
+            <button
+              className="btn btn-secondary btn-sm"
+              style={{ position: 'absolute', top: '1rem', right: '4rem' }}
+              onClick={startEditing}
             >
-              <option value="">-- none --</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="input-group" style={{ marginBottom: 0 }}>
-            <label>Priority</label>
-            <select
-              className="input"
-              value={newPriority}
-              onChange={(e) => setNewPriority(e.target.value as any)}
-            >
-              <option value="High">High</option>
-              <option value="Medium">Medium</option>
-              <option value="Low">Low</option>
-            </select>
-          </div>
-          <div className="input-group" style={{ marginBottom: 0 }}>
-            <label>Color</label>
-            <input
-              type="color"
-              className="input"
-              value={newColor}
-              onChange={(e) => setNewColor(e.target.value)}
-            />
-          </div>
-          <button
-            className="btn btn-primary"
-            onClick={async () => {
-              try {
-                const payload: any = { priority: newPriority, color_code: newColor };
-                if (selectedCategoryId != null) {
-                  payload.category_id = selectedCategoryId;
-                }
-                await TasksAPI.patch(id!, payload);
-                setToast("Updated");
-                setTimeout(() => setToast(null), 2000);
-                load();
-                window.dispatchEvent(new Event('tasks-changed'));
-              } catch (e) {
-                alert("Failed to update: " + (e instanceof Error ? e.message : ""));
-              }
-            }}
-          >
-            Save
-          </button>
-        </div>
+              Edit
+            </button>
+            <p style={{ color: 'var(--text-muted)' }}>{task.category} · {task.priority}</p>
+            {task.deadline && <p>Deadline: {new Date(task.deadline).toLocaleString()}</p>}
+            <p>{task.description}</p>
+          </>
+        )}
 
         <div style={{ marginTop: '1rem' }}>
           <label>Assigned Contact:</label>{' '}
@@ -281,7 +376,7 @@ export function TaskDetail() {
                   {history.map((h) => (
                     <li key={h.id} style={{ marginBottom: '1rem', borderLeft: '2px solid #ccc', paddingLeft: '0.5rem' }}>
                       <div>
-                        <strong>{h.action.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())}</strong> by {h.actor || 'unknown'}
+                        <strong>{h.action.replace('_', ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}</strong> by {h.actor || 'unknown'}
                       </div>
                       <div style={{ fontStyle: 'italic', color: '#555' }}>{h.details}</div>
                       <div style={{ fontSize: '0.85rem', color: '#888' }}>{new Date(h.timestamp).toLocaleString()}</div>

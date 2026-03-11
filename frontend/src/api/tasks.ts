@@ -18,6 +18,8 @@ export type Task = {
   id: number | string;
   title: string;
   category: string;
+  category_id?: number | null;
+  // legacy field; mirrors priority for compatibility
   urgency: string;
   description: string | null;
   status: TaskStatus;
@@ -33,7 +35,8 @@ export type Task = {
 
 export type CreateTaskPayload = {
   title: string;
-  urgency: string;
+  // urgency is optional and derived from priority
+  urgency?: string;
   description: string;
   status?: TaskStatus; // default to "active" on server
   deadline?: string | null;
@@ -48,6 +51,7 @@ export type CreateTaskPayload = {
 export type PatchTaskPayload = Partial<{
   title: string;
   category: string;
+  // urgency may be provided, but priority updates automatically
   urgency: string;
   description: string | null;
   status: TaskStatus;
@@ -83,8 +87,6 @@ export function setAuthToken(token: string | null) {
     localStorage.removeItem("token");
   }
 }
-
-const API_BASE = process.env.REACT_APP_API_BASE_URL ?? "";
 
 import client from "./client";
 import axios from "axios";
@@ -175,8 +177,17 @@ export const TasksAPI = {
         path += `?${qs}`;
       }
     }
-    const data = await request<{ tasks: Task[] }>(path);
-    return data.tasks;
+    // The backend currently returns { tasks: Task[] }.  Be defensive in case
+    // we accidentally get a plain array or some other shape.
+    const raw = await request<any>(path);
+    if (Array.isArray(raw)) {
+      return raw as Task[];
+    }
+    if (raw && Array.isArray(raw.tasks)) {
+      return raw.tasks as Task[];
+    }
+    // unexpected response, fall back to empty list
+    return [];
   },
   getHistory: (id: string) =>
     request<{ history: HistoryEntry[] }>(`/api/tasks/${id}/history`),
@@ -185,18 +196,30 @@ export const TasksAPI = {
 
   listFiltered: async (filter: string) => {
     // legacy helper for status-based filtering
-    const data = await request<{ tasks: Task[] }>(
+    const raw = await request<any>(
       `/api/tasks?status=${encodeURIComponent(filter)}`
     );
-    return data.tasks;
+    if (Array.isArray(raw)) {
+      return raw as Task[];
+    }
+    if (raw && Array.isArray(raw.tasks)) {
+      return raw.tasks as Task[];
+    }
+    return [];
   },
 
   listByPriority: async (priority: string) => {
     // server expects ?priority=High|Medium|Low
-    const data = await request<{ tasks: Task[] }>(
+    const raw = await request<any>(
       `/api/tasks?priority=${encodeURIComponent(priority)}`
     );
-    return data.tasks;
+    if (Array.isArray(raw)) {
+      return raw as Task[];
+    }
+    if (raw && Array.isArray(raw.tasks)) {
+      return raw.tasks as Task[];
+    }
+    return [];
   },
 
   create: async (payload: CreateTaskPayload) => {

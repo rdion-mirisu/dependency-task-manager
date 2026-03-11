@@ -81,6 +81,7 @@ The backend now offers several helpful routes:
   * `GET /api/integration/ical/export` – returns a `.ics` file containing the current user's tasks that have a deadline. Events use the task title/description as summary/description.
 
 * **Task history**
+  * `PATCH /api/tasks/<id>` – JWT-protected; updates a task. Fields such as title, description, priority, deadline, etc. may be supplied. **Status is now optional**; if omitted the existing status remains unchanged (previous versions required a status value). This endpoint returns the updated task object.
   * `GET /api/tasks/<id>/history` – JWT-protected; returns a list of history entries for the given task (only accessible to the task owner).
   * `GET /api/admin/history` – JWT-protected **admin only**; returns history entries for all tasks, including task title and actor username.
 

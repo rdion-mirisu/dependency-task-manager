@@ -11,8 +11,20 @@ export function CalendarPage() {
 
   const loadTasks = React.useCallback(async () => {
     try {
-      const data = await TasksAPI.list();
-      setTasks(data);
+      // TasksAPI.list is typed to return Task[] and already unwraps,
+      // but be defensive at the callsite in case we ever get an
+      // unexpected wrapper object.
+      const result: any = await TasksAPI.list();
+      // normalize the result so setTasks always receives an array.
+      let taskArray: any[];
+      if (Array.isArray(result)) {
+        taskArray = result;
+      } else if (result && Array.isArray(result.tasks)) {
+        taskArray = result.tasks;
+      } else {
+        taskArray = [];
+      }
+      setTasks(taskArray);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load tasks');
     }

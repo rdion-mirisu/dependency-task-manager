@@ -112,7 +112,7 @@ export function TaskCard({
         <div className={statusChipClass}>{task.status}</div>
       </div>
       <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-        {task.category}{task.category_id ? ` (#${task.category_id})` : ''} · {task.urgency}
+        {task.category}{task.category_id ? ` (#${task.category_id})` : ''} · {task.priority}
       </div>
       {task.status === 'waiting' && (
         <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>

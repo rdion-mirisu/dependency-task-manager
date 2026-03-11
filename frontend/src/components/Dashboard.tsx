@@ -25,7 +25,16 @@ export function Dashboard() {
       if (typeof categoryFilter === 'number') {
         filters.category_id = categoryFilter;
       }
-      let data = await TasksAPI.list(Object.keys(filters).length ? filters : undefined);
+      let raw: any = await TasksAPI.list(Object.keys(filters).length ? filters : undefined);
+      // normalize in case the API returns an object wrapper
+      let data: Task[];
+      if (Array.isArray(raw)) {
+        data = raw;
+      } else if (raw && Array.isArray(raw.tasks)) {
+        data = raw.tasks;
+      } else {
+        data = [];
+      }
 
       if (categoryFilter === "None") {
         data = data.filter((t) => t.category_id == null);

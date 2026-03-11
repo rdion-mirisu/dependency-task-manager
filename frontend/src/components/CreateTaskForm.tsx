@@ -5,7 +5,7 @@ import { TasksAPI, CategoriesAPI, CreateTaskPayload, Task, Category } from "../a
 type FormData = {
   title: string;
   category_id: string;
-  urgency: string;
+  // urgency removed; priority will be used instead
   description: string;
   deadline?: string;
   priority?: "High" | "Medium" | "Low";
@@ -18,11 +18,12 @@ export function CreateTaskForm({ onCreated }: { onCreated: (task: Task) => void 
     handleSubmit,
     formState: { errors, isSubmitting },
     reset,
+    setValue,
+    watch,
   } = useForm<FormData>({
     defaultValues: {
       title: "",
       category_id: "",
-      urgency: "",
       description: "",
       deadline: "",
       priority: "Low",
@@ -55,7 +56,8 @@ export function CreateTaskForm({ onCreated }: { onCreated: (task: Task) => void 
     try {
       const payload: CreateTaskPayload = {
         title: data.title.trim(),
-        urgency: data.urgency.trim(),
+        // ensure urgency always reflects priority, no user input
+        urgency: (data.priority ?? "Low").trim(),
         description: data.description.trim(),
         status: "active",
         deadline: data.deadline ? new Date(data.deadline).toISOString() : null,
@@ -116,17 +118,6 @@ export function CreateTaskForm({ onCreated }: { onCreated: (task: Task) => void 
         {errors.category_id && <div className="alert alert-error">{errors.category_id.message}</div>}
       </div>
 
-      <div className="input-group">
-        <label>Urgency *</label>
-        <input
-          type="text"
-          className="input"
-          {...register("urgency", { required: "Urgency is required" })}
-          disabled={isSubmitting}
-          placeholder="low, medium, high"
-        />
-        {errors.urgency && <div className="alert alert-error">{errors.urgency.message}</div>}
-      </div>
 
       <div className="input-group">
         <label>Description *</label>
@@ -173,12 +164,25 @@ export function CreateTaskForm({ onCreated }: { onCreated: (task: Task) => void 
 
       <div className="input-group">
         <label>Color</label>
-        <input
-          type="color"
-          className="input"
-          {...register("color_code")}
-          disabled={isSubmitting}
-        />
+        {/* simple palette instead of native color picker */}
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          {['#e74c3c', '#f1c40f', '#7f8c8d', '#3498db', '#2ecc71', '#808080'].map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setValue('color_code', c)}
+              disabled={isSubmitting}
+              style={{
+                backgroundColor: c,
+                width: '24px',
+                height: '24px',
+                border: watch('color_code') === c ? '2px solid #000' : '1px solid #ccc',
+                borderRadius: '3px',
+                cursor: 'pointer',
+              }}
+            />
+          ))}
+        </div>
       </div>
 
       <button type="submit" className="btn btn-primary" disabled={isSubmitting || categories.length === 0}>
